@@ -1,75 +1,62 @@
-# Memory for GitHub Copilot
+# Claude Code-style memory for the GitHub Copilot app
 
-A port of Claude Code's memory scheme to Copilot: one file per entry, plus an index
-that is injected into every request.
+Global, per-project, file-based memory that works like Claude Code's auto memory.
 
-## How it works
+## How it maps to Claude Code
 
-Claude Code's memory rests on three things. In Copilot each is replaced:
-
-| What's needed | Claude Code | Copilot (this kit) |
+| | Claude Code | GitHub Copilot app (this kit) |
 |---|---|---|
-| Rules + index in every session | the harness injects them | written directly into `.github/copilot-instructions.md`, which Copilot attaches to every request on its own — no model action involved |
-| Entries | files in `~/.claude/projects/…/memory/` | files in `.copilot-memory/` |
-| A way to write | Write/Edit tools | **Agent** mode can create and edit files in the workspace |
+| Storage | `~/.claude/projects/<project>/memory/` | `~/.copilot-memory/projects/<project-key>/` (`%USERPROFILE%` on Windows) |
+| Project key | project path, `/` → `-` | main repo root, every non-alphanumeric char → `-`; worktrees share their repo's memory |
+| Index | `MEMORY.md`, injected into every session by the harness | `MEMORY.md`, read by the agent at session start (the app has no auto-injection) |
+| Rules | memory section of the system prompt | `app-instructions.md` → app Settings → Sessions → **App instructions** (global, all sessions) |
+| Entries | one fact per file, frontmatter, `user`/`feedback`/`project`/`reference` | identical |
+| Cleanup | `/consolidate-memory` skill | `consolidate-memory` skill |
 
-Only the text *inside* `copilot-instructions.md` is guaranteed to be loaded. Files
-it merely points to are read only if the model decides to, which is why the protocol
-and the index live there rather than in a separate file.
+Additions on top of Claude Code's rules: memory is written strictly in English, and
+secrets are never stored.
 
-GitHub also has its own "Copilot Memory", but on corporate accounts it is usually
-turned off by organization policy. This kit doesn't depend on policies: it's just files.
+## Install (Windows)
 
-## Install
-
-```bash
-./install.sh /path/to/work/repo
+```powershell
+git clone git@github.com:EduardKarnaukh/github-copilot-memory.git
+cd github-copilot-memory
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-- No `.github/copilot-instructions.md` yet → it is created and kept out of git.
-- The file already exists (e.g. team rules) → the memory block is appended between
-  `<!-- copilot-memory:start/end -->` markers; the rest of the file is untouched.
-  If the file is tracked by git, the installer prints a `git update-index --skip-worktree`
-  command that keeps your memory block out of commits.
-- Re-running upgrades the protocol text and keeps the accumulated index.
-- `--commit` makes memory shared with the team (secrets are then even more off-limits).
+The script:
+1. creates `%USERPROFILE%\.copilot-memory\projects\`;
+2. installs the `remember` and `consolidate-memory` skills into `%USERPROFILE%\.copilot\skills\`;
+3. copies `app-instructions.md` to the clipboard.
 
-Files:
-- `memory-protocol.md` — the protocol template that goes into `copilot-instructions.md`.
-- `.github/prompts/` — the `/remember` and `/memory-review` commands.
+Then, in the GitHub Copilot app: **Settings → Sessions → Instructions → App
+instructions**, paste, save. If the field already has text, append below it.
 
-## Usage
+Manual install: create the folder, copy `skills\*` into `%USERPROFILE%\.copilot\skills\`,
+paste `app-instructions.md` into App instructions.
 
-- Chat in **Agent** mode. In Ask/Edit the agent cannot write files.
-- `/remember` — save what's worth keeping from the chat. `/remember <text>` — save something specific.
-- `/memory-review` — merge duplicates, check for stale facts, tighten the index.
-  It shows proposed deletions first and waits for confirmation.
-- Plain words work too: "remember that…", "forget about…".
-- Memory is always written in English, whatever language you chat in. Code, paths,
-  error messages, and UI labels are kept verbatim.
+## Use
 
-## Verify (2 minutes)
+- Just work. The agent reads the project's `MEMORY.md` at session start and saves
+  memories on its own when something qualifies.
+- "remember …" / "forget …", or the `remember` skill to capture a session.
+- `consolidate-memory` skill to merge duplicates, fix stale facts, prune the index.
 
-1. In an Agent chat: `remember that we deploy only on Tuesdays`. A file should appear
-   in `.copilot-memory/` and a line in the index block.
-2. In a **new** chat: `when do we deploy?` — it should answer without hints, and the
-   answer's **References** should list `copilot-instructions.md`.
+## Verify
 
-If `copilot-instructions.md` is not in References, check that the VS Code setting
-`github.copilot.chat.codeGeneration.useInstructionFiles` is on (it is by default).
+1. In a project session: `remember that we deploy only on Tuesdays`. A file should
+   appear under `%USERPROFILE%\.copilot-memory\projects\<project-key>\` plus a line in
+   its `MEMORY.md`.
+2. New session, same project: `when do we deploy?` — it should answer from memory.
+3. New session, another project: it should not know.
 
-## Where it works
+## Differences from Claude Code that remain
 
-`.github/copilot-instructions.md` is read by every Copilot client: VS Code, Copilot
-CLI, JetBrains, Visual Studio. Prompt files (`/remember`) are a VS Code feature; in
-other clients just say "remember …".
-
-## Limitations
-
-- **It saves on its own less often than Claude Code.** Copilot's own system prompt
-  comes first and pulls toward short answers; the "before your final answer"
-  checklist compensates. Calling `/remember` at the end of a long task is the most
-  reliable approach.
-- Memory writes may show up in VS Code's pending-edits review alongside code changes.
-- Memory is per repository. Global memory across projects would need the entries
-  folder outside the workspace, and then every write needs an access confirmation.
+- **No auto-injection.** Claude Code's harness puts `MEMORY.md` into context before
+  the model sees anything. Here the agent reads it itself because the instructions
+  tell it to; a model can occasionally skip that. Saying "check memory" fixes it.
+- **File access outside the project.** Memory lives in your home folder, so the app
+  may ask for permission the first time the agent reads or writes there. Allow it.
+- **Unverified paths.** The personal skills folder `~/.copilot/skills` and the
+  PowerShell snippet were not tested inside the app. If the skills don't show up,
+  add them through the app's skills settings instead.
